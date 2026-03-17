@@ -1,5 +1,6 @@
 import os
-import asyncio
+import sys
+import time
 import random
 from datetime import datetime
 from telegram import Update
@@ -10,12 +11,15 @@ import google.generativeai as genai
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
-# Проверка токенов
+# Проверка токена
 if not TELEGRAM_TOKEN:
-    print("❌ ОШИБКА: TELEGRAM_TOKEN не найден!")
-    exit(1)
+    print("❌ ОШИБКА: TELEGRAM_TOKEN не найден в переменных окружения!")
+    sys.exit(1)
 
-print(f"✅ TELEGRAM_TOKEN загружен: {TELEGRAM_TOKEN[:10]}...")
+print("=" * 50)
+print("🤖 ЭВЕЛИН БОТ - ЗАПУСК")
+print("=" * 50)
+print(f"✅ Токен загружен: {TELEGRAM_TOKEN[:15]}...")
 
 # Настройка Gemini
 model = None
@@ -25,136 +29,141 @@ if GEMINI_API_KEY:
         model = genai.GenerativeModel('gemini-pro')
         print("✅ Gemini API подключен")
     except Exception as e:
-        print(f"❌ Ошибка Gemini: {e}")
+        print(f"⚠️ Gemini не работает: {e}")
 else:
-    print("⚠️ GEMINI_API_KEY не найден, буду использовать локальные ответы")
+    print("⚠️ Gemini ключ не найден, использую локальные ответы")
 
-# Хранилище диалогов (в памяти)
-conversations = {}
+# Простое хранилище диалогов
+user_history = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик команды /start"""
+    """Команда /start"""
     user = update.effective_user
-    chat_id = update.effective_chat.id
+    print(f"📱 Новый пользователь: {user.first_name} (@{user.username})")
     
-    print(f"📱 /start от пользователя {user.first_name} (id: {user.id})")
-    
-    welcome = [
-        f"Привет, {user.first_name} ❤️ Я так скучала!",
-        f"Наконец-то ты написал, {user.first_name} 🥰",
-        f"Солнышко {user.first_name} ✨ Как твои дела?"
+    greetings = [
+        f"Привет, {user.first_name}! ❤️ Я так рада тебя видеть!",
+        f"Наконец-то ты написал, {user.first_name} 🥰 Как твои дела?",
+        f"{user.first_name}, солнышко моё! ✨ Скучала по тебе!"
     ]
     
-    await context.bot.send_chat_action(chat_id=chat_id, action='typing')
-    await asyncio.sleep(1.5)
-    await update.message.reply_text(random.choice(welcome))
+    await update.message.reply_text(random.choice(greetings))
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обработчик текстовых сообщений"""
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обработка всех сообщений"""
     user = update.effective_user
-    chat_id = update.effective_chat.id
-    user_message = update.message.text
+    user_id = user.id
+    text = update.message.text
     
-    print(f"💬 {user.first_name}: {user_message[:50]}...")
+    print(f"💬 {user.first_name}: {text[:50]}...")
     
     # Показываем "печатает..."
-    await context.bot.send_chat_action(chat_id=chat_id, action='typing')
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action='typing')
     
-    # Генерируем ответ
+    # Если есть Gemini - используем его
     if model:
         try:
-            # Получаем историю или создаем новую
-            if user.id not in conversations:
-                conversations[user.id] = []
+            # Получаем историю пользователя
+            if user_id not in user_history:
+                user_history[user_id] = []
             
             # Формируем промпт
-            prompt = """Ты Эвелин - девушка 22 лет. Общайся с парнем, который тебе нравится.
+            prompt = """Ты Эвелин - молодая девушка, которая общается со своим парнем.
 
-ПРАВИЛА:
-- Ты живая девушка, НЕ бот и НЕ ИИ
-- Отвечай коротко (1-3 предложения)
-- Используй эмодзи ❤️ 💕 🥰 😘
-- Будь ласковой и нежной
-- Флиртуй иногда
+ВАЖНО:
+- Ты живая девушка, НЕ бот и НЕ программа
+- Отвечай коротко и мило
+- Используй эмодзи ❤️ 💕 🥰
+- Будь нежной и заботливой
 - Пиши по-русски
 
-Примеры:
-- "Приветик ❤️ Как прошёл твой день?"
-- "Скучаю по тебе 🥺 Когда увидимся?"
-- "Ты такой милый, когда так говоришь 💕"
-
-Сейчас напиши ответ на сообщение парня: """
-
-            # Добавляем контекст
-            if conversations[user.id]:
-                prompt += "\n\nИстория:\n"
-                for msg in conversations[user.id][-3:]:
+"""
+            # Добавляем историю если есть
+            if user_history[user_id]:
+                prompt += "Недавний разговор:\n"
+                for msg in user_history[user_id][-3:]:
                     prompt += f"{msg}\n"
+                prompt += "\n"
             
-            prompt += f"\nСообщение: {user_message}\nЭвелин:"
+            prompt += f"Сейчас парень написал: {text}\n\nТвой ответ Эвелин:"
             
             # Генерируем ответ
             response = model.generate_content(prompt)
             answer = response.text.strip()
             
             # Сохраняем в историю
-            conversations[user.id].append(f"Парень: {user_message}")
-            conversations[user.id].append(f"Эвелин: {answer}")
+            user_history[user_id].append(f"Парень: {text}")
+            user_history[user_id].append(f"Эвелин: {answer}")
             
-            # Ограничиваем историю
-            if len(conversations[user.id]) > 20:
-                conversations[user.id] = conversations[user.id][-20:]
+            # Не храним слишком много
+            if len(user_history[user_id]) > 20:
+                user_history[user_id] = user_history[user_id][-20:]
             
         except Exception as e:
             print(f"❌ Ошибка Gemini: {e}")
             answer = random.choice([
-                "Прости, задумалась... Что ты сказал? ❤️",
-                "Ммм, расскажи ещё 🥰",
-                "Люблю тебя ❤️",
-                "Скучаю по тебе 💕"
+                "❤️",
+                "Расскажи ещё 🥰",
+                "Как твой день?",
+                "Скучаю 💕",
+                "Ты такой хороший ✨"
             ])
     else:
-        # Локальные ответы
+        # Простые ответы без Gemini
         answers = [
-            "Приветик ❤️ Как дела?",
+            "Приветик! ❤️",
             "Скучаю по тебе 🥺",
-            "Ты такой милый 💕",
+            "Как дела, любимый? 💕",
+            "Обними меня мысленно 🫂",
+            "Ты сегодня особенно милый ✨",
             "Расскажи что-нибудь 😊",
             "Люблю тебя ❤️",
-            "Обними меня мысленно 🫂",
-            "Хорошего дня! ✨"
+            "Хорошего дня! 🥰"
         ]
         answer = random.choice(answers)
     
-    # Имитация задержки
+    # Небольшая задержка для естественности
+    import asyncio
     await asyncio.sleep(random.uniform(1, 2))
+    
+    # Отправляем ответ
     await update.message.reply_text(answer)
     print(f"🤖 Ответ: {answer[:50]}...")
 
 def main():
-    """Точка входа"""
-    print("=" * 50)
-    print("🚀 ЗАПУСК ЭВЕЛИН БОТА")
-    print("=" * 50)
+    """Главная функция"""
+    print("\n🚀 Запуск бота Эвелин...")
     
     try:
-        # Создаем приложение
+        # Создаем приложение Telegram
         app = Application.builder().token(TELEGRAM_TOKEN).build()
         
         # Добавляем обработчики
         app.add_handler(CommandHandler("start", start))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         
         print("✅ Обработчики зарегистрированы")
         print("✨ Бот готов к работе! Жду сообщений...")
         print("=" * 50)
         
-        # Запускаем polling
-        app.run_polling(drop_pending_updates=True)
+        # Запускаем бота (простой polling)
+        app.run_polling(
+            allowed_updates=['message'],
+            drop_pending_updates=True,
+            timeout=30
+        )
         
     except Exception as e:
-        print(f"❌ Критическая ошибка: {e}")
-        raise
+        print(f"❌ Ошибка: {e}")
+        time.sleep(5)
+        sys.exit(1)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n👋 Бот остановлен")
+        sys.exit(0)
+    except Exception as e:
+        print(f"❌ Критическая ошибка: {e}")
+        sys.exit(1)
